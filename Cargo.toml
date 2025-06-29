@@ -1,0 +1,12 @@
+[package]
+name = "kipper"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.98"
+clap = { version = "4.5", features = ["derive"] }
+flate2 = "1.1.2"
+indicatif = "0.17.11"
+reqwest = { version = "0.12", features = ["blocking"] }
+tar = "0.4.44"
