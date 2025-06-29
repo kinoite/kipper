@@ -1,9 +1,11 @@
 use clap::Parser;
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{ProgressBar, ProgressStyle, HumanDuration};
 use std::env;
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::time::Instant;
 use anyhow::{Context, Result};
 
 #[derive(Parser, Debug)]
@@ -31,15 +33,10 @@ fn download_file(url: &str, path: &Path) -> Result<()> {
 
     let mut dest = File::create(path)?;
     let mut downloaded: u64 = 0;
-
     let mut buffer = [0; 8192];
-    loop {
-        let n = match response.read(&mut buffer) {
-            Ok(0) => break,
-            Ok(n) => n,
-            Err(ref e) if e.kind() == io::ErrorKind::Interrupted => continue,
-            Err(e) => return Err(e.into()),
-        };
+    
+    while let Ok(n) = response.read(&mut buffer) {
+        if n == 0 { break; }
         dest.write_all(&buffer[..n])?;
         downloaded += n as u64;
         pb.set_position(downloaded);
@@ -94,21 +91,69 @@ fn main() -> Result<()> {
     let kopi_home = PathBuf::from(home_dir).join(".kopi");
     let kopi_bin = kopi_home.join("bin");
     fs::create_dir_all(&kopi_bin).context("Failed to create Kopi installation directory")?;
-    let asset_name = "kopi-0.1.0-alpha.tar.gz";
-    let download_url = "https://github.com/kinoite/kopi-lang/releases/download/0.1.0/kopi-0.1.0-alpha.tar.gz";
-
-    println!("Downloading from: {}", download_url);
-
     let temp_dir = env::temp_dir().join("kipper_install");
+    if temp_dir.exists() { fs::remove_dir_all(&temp_dir)?; }
     fs::create_dir_all(&temp_dir)?;
-    let archive_path = temp_dir.join(asset_name);
 
-    download_file(download_url, &archive_path)?;
+    let version_tag = "v0.1.0";
+    let download_url = format!(
+        "https://github.com/kinoite/kopi-lang/archive/refs/tags/{}.tar.gz",
+        version_tag
+    );
+    let archive_path = temp_dir.join(format!("{}.tar.gz", version_tag));
     
-    println!("\nUnpacking toolchain...");
-    unpack_archive(&archive_path, &kopi_bin)?;
+    println!("Downloading Kopi source code (version {})", version_tag);
+    download_file(&download_url, &archive_path)?;
     
-    println!("Installation complete.");
+    println!("\nUnpacking source code...");
+    unpack_archive(&archive_path, &temp_dir)?;
+    println!("Unpacked successfully.");
+
+    let source_dir_name = format!("kopi-lang-{}", version_tag);
+    let compile_path = temp_dir.join(source_dir_name).join("kopi_rust");
+    
+    let bar_style = ProgressStyle::default_spinner()
+        .tick_strings(&[
+            "==    ",
+            " =    ",
+            "  =   ",
+            "   =  ",
+            "    = ",
+            "    ==",
+            "    = ",
+            "   =  ",
+            "  =   ",
+            " =    ",
+        ])
+        .template("{spinner:.red} {msg}")?;
+
+    let pb = ProgressBar::new_spinner();
+    pb.enable_steady_tick(std::time::Duration::from_millis(120));
+    pb.set_style(bar_style);
+    pb.set_message("Compiling Kopi interpreter (this may take a moment)...");
+    
+    let start_time = Instant::now();
+    let build_status = Command::new("cargo")
+        .args(["build", "--release", "--quiet"])
+        .current_dir(&compile_path)
+        .output()
+        .context("Failed to execute 'cargo'. Is the Rust toolchain installed?")?;
+
+    if !build_status.status.success() {
+        pb.finish_with_message("Compilation failed.");
+        io::stderr().write_all(&build_status.stderr)?;
+        return Err(anyhow::anyhow!("Cargo build failed."));
+    }
+    
+    let duration = start_time.elapsed();
+    pb.finish_with_message(format!("Compilation finished in {}.", HumanDuration(duration)));
+
+    let compiled_binary_path = compile_path.join("target/release/kopi");
+    let dest_path = kopi_bin.join("kopi");
+    fs::rename(&compiled_binary_path, &dest_path)
+        .context(format!("Failed to move compiled binary from {:?} to {:?}", compiled_binary_path, dest_path))?;
+
+    println!("Successfully installed Kopi to {}", dest_path.display());
     
     update_shell_profile(kopi_bin.to_str().unwrap())?;
 
