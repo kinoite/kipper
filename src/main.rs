@@ -94,22 +94,16 @@ fn main() -> Result<()> {
     let kopi_home = PathBuf::from(home_dir).join(".kopi");
     let kopi_bin = kopi_home.join("bin");
     fs::create_dir_all(&kopi_bin).context("Failed to create Kopi installation directory")?;
+    let asset_name = "kopi-0.1.0-alpha.tar.gz";
+    let download_url = "https://github.com/kinoite/kopi-lang/releases/download/0.1.0/kopi-0.1.0-alpha.tar.gz";
 
-    let target_triple = get_target_triple();
-    let asset_name = format!("kopi-0.1.0-alpha.tar.gz", target_triple);
-    let download_url = format!(
-        "https://github.com/kinoite/kopi-lang/releases/download/0.1.0/kopi-0.1.0-alpha.tar.gz",
-        asset_name
-    );
-
-    println!("Target platform: {}", target_triple);
     println!("Downloading from: {}", download_url);
 
     let temp_dir = env::temp_dir().join("kipper_install");
     fs::create_dir_all(&temp_dir)?;
-    let archive_path = temp_dir.join(&asset_name);
+    let archive_path = temp_dir.join(asset_name);
 
-    download_file(&download_url, &archive_path)?;
+    download_file(download_url, &archive_path)?;
     
     println!("\nUnpacking toolchain...");
     unpack_archive(&archive_path, &kopi_bin)?;
